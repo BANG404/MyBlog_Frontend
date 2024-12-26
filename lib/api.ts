@@ -1,3 +1,4 @@
+import { get } from 'lodash';
 import { BlogPost, LoginRequest, RegisterRequest,RegisterResponse, UserInfo, Media, UpdateUserInfoRequest,DashboardData } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -5,7 +6,6 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 async function fetchWithErrorHandling(url: string, options: RequestInit = {}) {
   const token = localStorage.getItem('token');
   
-  // 移除 credentials: 'include'，因为我们使用 Bearer token
   const defaultOptions: RequestInit = {
     headers: {
       'Content-Type': 'application/json',
@@ -18,9 +18,7 @@ async function fetchWithErrorHandling(url: string, options: RequestInit = {}) {
   try {
     const response = await fetch(url, defaultOptions);
     
-    // 检查响应状态
     if (!response.ok) {
-      // 尝试解析错误消息
       const errorData = await response.json().catch(() => null);
       throw new Error(
         errorData?.message || 
@@ -28,13 +26,16 @@ async function fetchWithErrorHandling(url: string, options: RequestInit = {}) {
       );
     }
 
-    // 检查响应是否为空
-    const data = await response.json();
-    if (!data) {
-      throw new Error('Response is empty');
+    // 检查 Content-Length 和 Content-Type
+    const contentLength = response.headers.get('Content-Length');
+    const contentType = response.headers.get('Content-Type');
+
+    // 如果响应为空或不是 JSON 类型，直接返回 true
+    if (contentLength === '0' || !contentType?.includes('application/json')) {
+      return true;
     }
 
-    return data;
+    return await response.json();
   } catch (error) {
     console.error('API request failed:', error);
     throw error;
@@ -64,9 +65,31 @@ export async function updatePost(postId: number, post: BlogPost) {
 }
 
 export async function deletePost(postId: number) {
-  const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/blog/${postId}`, {
-    method: 'DELETE'
-  });
+  try {
+    const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/blog/${postId}`, {
+      method: 'DELETE'
+    });
+    
+    // response 可能是 true 或 其他响应数据
+    return response;
+  } catch (error) {
+    console.error('Delete post error:', error);
+    throw error instanceof Error 
+      ? error 
+      : new Error('删除文章失败');
+  }
+}
+
+export async function fetchPost(postId: number): Promise<BlogPost> {
+  const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/blog/${postId}`);
+  return response;
+}
+
+// 搜索博客文章
+export async function searchPosts(keyword: string, page = 0, size = 10) {
+  const response = await fetchWithErrorHandling(
+    `${API_BASE_URL}/api/blog/search?keyword=${encodeURIComponent(keyword)}&page=${page}&size=${size}`
+  );
   return response;
 }
 
@@ -164,18 +187,23 @@ export async function getCurrentUser(): Promise<UserInfo> {
 
 // 获取首页仪表盘数据
 export async function getDashboardData(): Promise<DashboardData> {
+  let user;
   try {
-    const [userInfo, posts, media, links] = await Promise.all([
+    user=getCurrentUser(); // 确保用户已登录
+    
+    const [userInfo, posts, musicMedia, movieMedia, links] = await Promise.all([
       getCurrentUser(),
       fetchPosts(0, 5), // 获取最新5篇文章
-      getLatestMedia(1),
+      getLatestMediaByType((await user).username,'音乐'),
+      getLatestMediaByType((await user).username,'影视'),
       getLatestSharedLinks(5)
     ]);
 
     return {
       userInfo,
       recentPosts: posts.content,
-      latestMedia: media,
+      latestMusicMedia: musicMedia,
+      latestMovieMedia: movieMedia,
       recentLinks: links,
     };
   } catch (error) {
@@ -184,13 +212,14 @@ export async function getDashboardData(): Promise<DashboardData> {
 }
 
 // 媒体相关 API
-export async function getLatestMedia(userId: number) {
-  const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/media/latest?userId=${userId}`);
-  return response;
-}
 
-export async function getLatestMediaByType(userId: number, type: 'music' | 'movie') {
-  const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/media/${type}/latest?userId=${userId}`);
+
+export async function getLatestMediaByType(username: string,type:'音乐'|'影视') {
+  const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/media/latest?username=${username}&type=${type}`);
+  console.log('Get latest media response:', response); // 调试日志
+  if (response === true) {
+    return null;
+  }
   return response;
 }
 
@@ -219,3 +248,36 @@ export async function getLatestSharedLinks(limit: number = 5) {
   return response;
 }
 
+export async function getPost(postId: number): Promise<BlogPost> {
+  try {
+    const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/blog/${postId}`);
+    return response;
+  } catch (error) {
+    console.error('Get post error:', error);
+    throw error instanceof Error 
+      ? error 
+      : new Error('获取文章失败');
+  }
+}
+
+// 添加 RSS 订阅相关 API
+export async function getRssFeed(): Promise<string> {
+  return `${API_BASE_URL}/api/rss`;
+  // try {
+  //   const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/rss`, {
+  //     method: 'GET',
+  //     headers: {
+  //       'Accept': 'application/xml',
+  //     },
+  //   });
+  //   return response;
+  //   console.log('Get RSS feed response:', response); // 调试日志
+  // } catch (error) {
+  //   console.error('Get RSS feed error:', error);
+  //   throw error instanceof Error 
+  //     ? error 
+  //     : new Error('获取 RSS 订阅链接失败');
+  // }
+}
+
+//

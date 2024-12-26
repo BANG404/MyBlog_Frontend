@@ -119,9 +119,13 @@ export interface UpdateUserInfoRequest {
 export interface DashboardData {
   userInfo: UserInfo;
   recentPosts: BlogPostListDTO[];
-  latestMedia: {
-    music?: Media;
-    movie?: Media;
-  };
+  latestMusicMedia: Media;
+  latestMovieMedia: Media;
   recentLinks: SharedLink[];
+}
+
+export interface SearchBlogPostRequest {
+  keyword: string;
+  page?: number;
+  size?: number;
 }

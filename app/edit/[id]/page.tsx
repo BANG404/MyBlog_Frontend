@@ -9,10 +9,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Image, Video, Upload, Save, ArrowLeft } from 'lucide-react'
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from '@/components/AuthContext'
+import { BlogPost } from '@/lib/types'
+import { fetchPost, updatePost } from '@/lib/api'
 
 export default function EditPage() {
   const router = useRouter()
   const { id } = useParams()
+  const [post, setPost] = useState<BlogPost | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [activeTab, setActiveTab] = useState('write')
@@ -27,21 +30,46 @@ export default function EditPage() {
   }, [isLoggedIn, router])
 
   useEffect(() => {
-    // 这里应该从后端获取文章数据
-    // 为了演示，我们使用模拟数据
-    setTitle(`编辑博客标题 ${id}`)
-    setContent(`这是博客 ${id} 的内容。\n\n你可以在这里编辑 Markdown 格式的文本。`)
-  }, [id])
+    const getPost = async () => {
+      if (id) {
+        try {
+          const postData = await fetchPost(Number(id))
+          setPost(postData)
+          setTitle(postData.title)
+          setContent(postData.content)
+        } catch (error) {
+          console.error('Failed to fetch post:', error)
+          toast({
+            title: "错误",
+            description: "无法获取文章信息，请稍后重试。",
+            variant: "destructive",
+          })
+        }
+      }
+    }
 
-  const handleSubmit = (e: React.FormEvent) => {
+    getPost()
+  }, [id, toast])
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // 这里应该发送更新请求到后端
-    console.log('Updating post:', { id, title, content })
-    toast({
-      title: "文章已更新",
-      description: "您的文章已成功更新。",
-    })
-    router.push('/')
+    if (!post) return
+
+    try {
+      const updatedPost = await updatePost(post.postId!, { ...post, title, content })
+      toast({
+        title: "文章已更新",
+        description: "您的文章已成功更新。",
+      })
+      router.push('/')
+    } catch (error) {
+      console.error('Failed to update post:', error)
+      toast({
+        title: "更新失败",
+        description: "无法更新文章，请稍后重试。",
+        variant: "destructive",
+      })
+    }
   }
 
   const insertAtCursor = useCallback((text: string) => {

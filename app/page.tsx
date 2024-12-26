@@ -26,12 +26,22 @@ import { EditBloggerInfoModal } from "@/components/EditBloggerInfoModal";
 import {
   checkUserExists,
   fetchPosts,
-  getLatestMedia,
+  getLatestMediaByType,
   getDashboardData,
   updateUserInfo,
+  deletePost,
+  getRssFeed,
+  searchPosts,
 } from "@/lib/api";
-import { BlogPost, Media, UserInfo, BlogPostListDTO, UpdateUserInfoRequest } from "@/lib/types";
+import {
+  BlogPost,
+  Media,
+  UserInfo,
+  BlogPostListDTO,
+  UpdateUserInfoRequest,
+} from "@/lib/types";
 import { SharedLink } from "@/lib/types";
+import { formatDate } from "@/lib/utils";
 
 export default function BlogPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -43,15 +53,19 @@ export default function BlogPage() {
   const [showAllLinks, setShowAllLinks] = useState(false);
   const [posts, setPosts] = useState<BlogPostListDTO[]>([]);
   const [sharedLinks, setSharedLink] = useState<SharedLink[]>([]);
-  const [mediaData, setMediaData] = useState<{
-    music?: Media;
-    movie?: Media;
-  }>({});
+  const [latestMusicMedia, setLatestMusicMedia] = useState<Media | null>(null);
+  const [latestMovieMedia, setLatestMovieMedia] = useState<Media | null>(null);
   const [bloggerInfo, setBloggerInfo] = useState<UserInfo>({
     username: "",
     email: "",
     blogName: "",
   });
+  const [searchResults, setSearchResults] = useState<BlogPostListDTO[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const observerTarget = useRef(null);
 
   useEffect(() => {
     const initializePage = async () => {
@@ -70,14 +84,16 @@ export default function BlogPage() {
           return;
         }
 
-        // 获取首页所需的所有数据
         const dashboardData = await getDashboardData();
 
         // 更新状态
         setBloggerInfo(dashboardData.userInfo);
         setPosts(dashboardData.recentPosts);
-        setMediaData(dashboardData.latestMedia);
+        setLatestMusicMedia(dashboardData.latestMusicMedia);
+        setLatestMovieMedia(dashboardData.latestMovieMedia);
         setSharedLink(dashboardData.recentLinks);
+        setPage(1); // 设置初始页码
+        setHasMore(dashboardData.recentPosts.length === 5); // 假设每页 10 条
         console.log("Dashboard data:", dashboardData);
       } catch (error) {
         console.error("初始化页面失败:", error);
@@ -94,6 +110,52 @@ export default function BlogPage() {
     initializePage();
   }, []); // 移除 router 和 toast 依赖，避免重复执行
 
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
+          loadMorePosts();
+        }
+      },
+      { threshold: 1.0 }
+    );
+
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current);
+    }
+
+    return () => {
+      if (observerTarget.current) {
+        observer.unobserve(observerTarget.current);
+      }
+    };
+  }, [hasMore, isLoadingMore]);
+
+  const loadMorePosts = async () => {
+    if (isLoadingMore) return;
+
+    setIsLoadingMore(true);
+    try {
+      const newPosts = await fetchPosts(page, 5);
+      if (newPosts.content.length > 0) {
+        setPosts((prevPosts) => [...prevPosts, ...newPosts.content]);
+        setPage((prevPage) => prevPage + 1);
+        setHasMore(newPosts.content.length === 5);
+      } else {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error("Failed to load more posts:", error);
+      toast({
+        title: "加载失败",
+        description: "无法加载更多文章，请稍后重试。",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
   // 如果正在加载，显示加载状态
   if (loading) {
     return (
@@ -108,15 +170,32 @@ export default function BlogPage() {
     );
   }
 
-  const filteredPosts = posts.filter(
-    (post) =>
-      post.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      post.preview.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredPosts = searchQuery
+    ? (searchResults.length > 0 ? searchResults : posts).filter(
+        (post) =>
+          post.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          post.preview.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : posts;
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Searching for:", searchQuery);
+    if (!searchQuery.trim()) return;
+
+    setIsSearching(true);
+    try {
+      const response = await searchPosts(searchQuery);
+      setSearchResults(response.content);
+    } catch (error) {
+      console.error("搜索失败:", error);
+      toast({
+        title: "搜索失败",
+        description: error instanceof Error ? error.message : "搜索文章时发生错误",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const handleLogout = () => {
@@ -132,25 +211,26 @@ export default function BlogPage() {
         email: newInfo.email,
         wechatId: newInfo.wechatId,
         bio: newInfo.bio,
-        blogName: newInfo.blogName
+        blogName: newInfo.blogName,
       };
-  
+
       // 更新用户信息
       await updateUserInfo(updateData);
-      
+
       // 更新本地状态
       setBloggerInfo(newInfo);
-      
+
       toast({
         title: "博主信息已更新",
         description: "您的个人信息已成功更新。",
       });
     } catch (error) {
-      console.error('更新失败:', error);
+      console.error("更新失败:", error);
       toast({
         title: "更新失败",
-        description: error instanceof Error ? error.message : "更新个人信息时发生错误",
-        variant: "destructive"
+        description:
+          error instanceof Error ? error.message : "更新个人信息时发生错误",
+        variant: "destructive",
       });
     }
   };
@@ -159,9 +239,18 @@ export default function BlogPage() {
     router.push(`/edit/${postId}`);
   };
 
-  const handleDeletePost = (postId: number) => {
+  const handleDeletePost = async (postId: number) => {
     if (window.confirm("确定要删除这篇文章吗？此操作不可撤销。")) {
+      console.log("Deleting post:", postId);
+      await deletePost(postId);
       setPosts(posts.filter((post) => post.postId !== postId));
+      const dashboardData = await getDashboardData();
+      // 更新状态
+      setBloggerInfo(dashboardData.userInfo);
+      setPosts(dashboardData.recentPosts);
+      setLatestMusicMedia(dashboardData.latestMusicMedia);
+      setLatestMovieMedia(dashboardData.latestMovieMedia);
+      setSharedLink(dashboardData.recentLinks);
       toast({
         title: "文章已删除",
         description: "您的文章已成功删除。",
@@ -169,22 +258,7 @@ export default function BlogPage() {
     }
   };
 
-  const musicData = {
-    song: "想象之中",
-    artist: "许嵩",
-    albumCover: "/placeholder.svg?height=300&width=300",
-  };
-
-  const movieData = {
-    title: "星际穿越",
-    director: "克里斯托弗·诺兰",
-    poster: "/placeholder.svg?height=450&width=300",
-  };
-
-  const generateArtisticImage = (
-    type: "music" | "movie",
-    data: typeof musicData | typeof movieData
-  ) => {
+  const generateArtisticImage = (type: "music" | "movie", data: Media) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -231,29 +305,25 @@ export default function BlogPage() {
     ctx.fillText(type === "music" ? "我正在听" : "我正在看", 600, 200);
 
     ctx.font = "bold 48px Arial";
-    ctx.fillText(
-      type === "music"
-        ? (data as typeof musicData).song
-        : (data as typeof movieData).title,
-      600,
-      280
-    );
+    ctx.fillText(data.title, 600, 280);
 
     ctx.font = "36px Arial";
-    ctx.fillText(
-      type === "music"
-        ? (data as typeof musicData).artist
-        : (data as typeof movieData).director,
-      600,
-      340
-    );
+    ctx.fillText(data.artist || data.artist || "", 600, 340);
 
     return canvas.toDataURL();
   };
 
   const handleShare = async (type: "music" | "movie") => {
-    const data = type === "music" ? musicData : movieData;
-    const imageData = generateArtisticImage(type, data);
+    const media = type === "music" ? latestMusicMedia : latestMovieMedia;
+    if (!media) {
+      toast({
+        title: "分享失败",
+        description: `没有可分享的${type === "music" ? "音乐" : "电影"}数据`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const imageData = generateArtisticImage(type, media);
 
     if (imageData) {
       try {
@@ -277,6 +347,24 @@ export default function BlogPage() {
           variant: "destructive",
         });
       }
+    }
+  };
+
+  const handleRssSubscribe = async () => {
+    try {
+      const rssFeedUrl = await getRssFeed();
+      window.open(rssFeedUrl, '_blank');
+      toast({
+        title: "RSS 订阅",
+        description: "RSS 订阅链接已在新标签页打开",
+      });
+    } catch (error) {
+      console.error('Failed to get RSS feed:', error);
+      toast({
+        title: "RSS 订阅失败",
+        description: "无法获取 RSS 订阅链接，请稍后重试。",
+        variant: "destructive",
+      });
     }
   };
 
@@ -309,8 +397,12 @@ export default function BlogPage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-            <Button type="submit" size="icon">
-              <Search className="h-4 w-4" />
+            <Button type="submit" size="icon" disabled={isSearching}>
+              {isSearching ? (
+                <div className="animate-spin">⌛</div>
+              ) : (
+                <Search className="h-4 w-4" />
+              )}
             </Button>
             {isLoggedIn ? (
               <>
@@ -357,6 +449,9 @@ export default function BlogPage() {
                     </p>
                   )}
                 </div>
+                <Button className="w-full" variant="outline" onClick={handleRssSubscribe}>
+                  RSS 订阅
+                </Button>
               </div>
             )}
           </CardContent>
@@ -377,12 +472,12 @@ export default function BlogPage() {
                     </Link>
                   </h3>
                   <span className="text-sm text-muted-foreground bg-secondary px-2 py-1 rounded-full">
-                    {post.publishedAt}
+                    {formatDate(post.publishedAt)}
                   </span>
                 </div>
                 <div className="prose dark:prose-invert max-w-none mb-4">
                   <ReactMarkdown>
-                    {post.preview.slice(0, 150) + "..."}
+                    {(post.preview ?? '').slice(0, 150) + "..."}
                   </ReactMarkdown>
                 </div>
                 <div className="flex items-center justify-between mt-4">
@@ -423,11 +518,22 @@ export default function BlogPage() {
               </CardContent>
             </Card>
           )}
+          {hasMore && (
+            <div ref={observerTarget} className="flex justify-center p-4">
+              {isLoadingMore ? (
+                <div className="animate-spin">⌛</div>
+              ) : (
+                <Button onClick={loadMorePosts} variant="outline">
+                  加载更多
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right Sidebar */}
         <div className="space-y-6">
-          {mediaData.music && (
+          {latestMusicMedia && (
             <Card>
               <CardHeader className="relative">
                 <CardTitle className="flex items-center gap-2">
@@ -445,23 +551,26 @@ export default function BlogPage() {
               </CardHeader>
               <CardContent className="flex items-center space-x-4">
                 <Image
-                  src={musicData.albumCover}
-                  alt={`${musicData.song} by ${musicData.artist}`}
+                  src={
+                    latestMusicMedia.picture ||
+                    "/placeholder.svg?height=300&width=300"
+                  }
+                  alt={`${latestMusicMedia.title} by ${latestMusicMedia.artist}`}
                   width={80}
                   height={80}
                   className="rounded-md"
                 />
                 <div>
-                  <p className="font-semibold">{musicData.song}</p>
+                  <p className="font-semibold">{latestMusicMedia.title}</p>
                   <p className="text-sm text-muted-foreground">
-                    {musicData.artist}
+                    {latestMusicMedia.artist}
                   </p>
                 </div>
               </CardContent>
             </Card>
           )}
 
-          {mediaData.movie && (
+          {latestMovieMedia && (
             <Card>
               <CardHeader className="relative">
                 <CardTitle className="flex items-center gap-2">
@@ -479,16 +588,19 @@ export default function BlogPage() {
               </CardHeader>
               <CardContent className="flex items-center space-x-4">
                 <Image
-                  src={movieData.poster}
-                  alt={movieData.title}
+                  src={
+                    latestMovieMedia.picture ||
+                    "/placeholder.svg?height=450&width=300"
+                  }
+                  alt={latestMovieMedia.title}
                   width={60}
                   height={90}
                   className="rounded-md"
                 />
                 <div>
-                  <p className="font-semibold">{movieData.title}</p>
+                  <p className="font-semibold">{latestMovieMedia.title}</p>
                   <p className="text-sm text-muted-foreground">
-                    {movieData.director}
+                    {latestMovieMedia.artist}
                   </p>
                 </div>
               </CardContent>
