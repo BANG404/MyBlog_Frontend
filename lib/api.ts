@@ -228,18 +228,36 @@ export async function uploadFile(file: File) {
   const formData = new FormData();
   formData.append('file', file);
   
-  const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/files/upload`, {
+  const token = localStorage.getItem('token');
+  const response = await fetch(`${API_BASE_URL}/api/files/upload`, {
     method: 'POST',
+    headers: {
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
     body: formData
   });
-  return response;
+
+  if (!response.ok) {
+    throw new Error(`Upload failed: ${response.status}`);
+  }
+
+  return response.json();
 }
 
 export async function deleteFile(fileId: number) {
-  const response = await fetchWithErrorHandling(`${API_BASE_URL}/api/files/${fileId}`, {
-    method: 'DELETE'
+  const token = localStorage.getItem('token');
+  const response = await fetch(`${API_BASE_URL}/api/files/${fileId}`, {
+    method: 'DELETE',
+    headers: {
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    }
   });
-  return response;
+
+  if (!response.ok) {
+    throw new Error(`Delete failed: ${response.status}`);
+  }
+
+  return true;
 }
 
 // 添加分享链接相关 API

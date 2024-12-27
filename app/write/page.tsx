@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Image, Video, Upload, Save, ArrowLeft } from 'lucide-react'
 import { useToast } from "@/hooks/use-toast"
 import debounce from 'lodash/debounce'
-import { createPost } from '@/lib/api'
+import { createPost, uploadFile } from '@/lib/api'
 import { BlogPost } from '@/lib/types'
 
 const AUTOSAVE_DELAY = 5000 // 5 seconds
@@ -134,21 +134,22 @@ export default function WritePage() {
           const formData = new FormData()
           formData.append('file', blob, 'pasted_image.png')
           
-          // Here you would typically upload the image to your server or a file hosting service
-          // For this example, we'll just create a fake URL
-          const imageUrl = URL.createObjectURL(blob)
+          // 调用 uploadFile API 上传图片
+          const response = await uploadFile(blob)
+          // 假设返回的 response 中包含图片 URL
+          const imageUrl = response.url
           
           insertAtCursor(`![Pasted Image](${imageUrl})`)
           
           toast({
             title: "图片已插入",
-            description: "剪贴板中的图片已成功插入到文章中。",
+            description: "剪贴板中的图片已成功上传并插入到文章中。",
           })
         } catch (error) {
           console.error('Failed to upload image:', error)
           toast({
             title: "图片插入失败",
-            description: "无法插入剪贴板中的图片，请重试。",
+            description: "无法上传剪贴板中的图片，请重试。",
             variant: "destructive",
           })
         }
@@ -170,15 +171,31 @@ export default function WritePage() {
     }
   }, [insertAtCursor])
 
-  const handleUploadImage = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadImage = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Here you would typically upload the file to your server or a file hosting service
-    // For this example, we'll just create a fake URL
-    const imageUrl = URL.createObjectURL(file)
-    insertAtCursor(`![Uploaded Image](${imageUrl})`)
-  }, [insertAtCursor])
+    try {
+      // 调用 uploadFile API 上传图片
+      const response = await uploadFile(file)
+      // 假设返回的 response 中包含图片 URL
+      const imageUrl = response.url
+      
+      insertAtCursor(`![Uploaded Image](${imageUrl})`)
+      
+      toast({
+        title: "图片已上传",
+        description: "图片已成功上传并插入到文章中。",
+      })
+    } catch (error) {
+      console.error('Failed to upload image:', error)
+      toast({
+        title: "图片上传失败",
+        description: "无法上传图片，请重试。",
+        variant: "destructive",
+      })
+    }
+  }, [insertAtCursor, toast])
 
   return (
     <div className="container mx-auto p-4 max-w-5xl">

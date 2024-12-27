@@ -10,7 +10,7 @@ import { Image, Video, Upload, Save, ArrowLeft } from 'lucide-react'
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from '@/components/AuthContext'
 import { BlogPost } from '@/lib/types'
-import { fetchPost, updatePost } from '@/lib/api'
+import { fetchPost, updatePost, uploadFile } from '@/lib/api'
 
 export default function EditPage() {
   const router = useRouter()
@@ -102,15 +102,71 @@ export default function EditPage() {
     }
   }, [insertAtCursor])
 
-  const handleUploadImage = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadImage = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // 这里应该上传图片到服务器
-    // 为了演示，我们使用本地 URL
-    const imageUrl = URL.createObjectURL(file)
-    insertAtCursor(`![Uploaded Image](${imageUrl})`)
-  }, [insertAtCursor])
+    try {
+      // 调用 uploadFile API 上传图片
+      const response = await uploadFile(file)
+      // 假设返回的 response 中包含图片 URL
+      const imageUrl = response.url
+      
+      insertAtCursor(`![Uploaded Image](${imageUrl})`)
+      
+      toast({
+        title: "图片已上传",
+        description: "图片已成功上传并插入到文章中。",
+      })
+    } catch (error) {
+      console.error('Failed to upload image:', error)
+      toast({
+        title: "图片上传失败",
+        description: "无法上传图片，请重试。",
+        variant: "destructive",
+      })
+    }
+  }, [insertAtCursor, toast])
+
+  // 添加粘贴图片功能
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          e.preventDefault()
+          const blob = items[i].getAsFile()
+          if (!blob) continue
+
+          try {
+            // 调用 uploadFile API 上传图片
+            const response = await uploadFile(blob)
+            // 假设返回的 response 中包含图片 URL
+            const imageUrl = response.url
+            
+            insertAtCursor(`![Pasted Image](${imageUrl})`)
+            
+            toast({
+              title: "图片已插入",
+              description: "剪贴板中的图片已成功上传并插入到文章中。",
+            })
+          } catch (error) {
+            console.error('Failed to upload image:', error)
+            toast({
+              title: "图片插入失败",
+              description: "无法上传剪贴板中的图片，请重试。",
+              variant: "destructive",
+            })
+          }
+        }
+      }
+    }
+
+    editorRef.current?.addEventListener('paste', handlePaste)
+    return () => editorRef.current?.removeEventListener('paste', handlePaste)
+  }, [insertAtCursor, toast])
 
   return (
     <div className="container mx-auto p-4 max-w-5xl">
